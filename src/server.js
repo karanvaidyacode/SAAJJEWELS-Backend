@@ -1,10 +1,12 @@
-// app.js
+// src/server.js
 require("dotenv").config();
 const express = require("express");
 const cors = require("cors");
 const passport = require("passport");
-const { connectDB } = require("./config/db");
 
+const { connectDB } = require("../src/config/db"); // keep your existing connectDB
+
+// routes (adjust paths if your routes are elsewhere)
 const authRoutes = require("../src/routes/auth.routes");
 const offersRoutes = require("../src/routes/offers.routes");
 const userRoutes = require("../src/routes/user.routes");
@@ -15,34 +17,29 @@ const razorpayRoutes = require("../src/routes/razorpay.routes");
 const contactRoutes = require("../src/routes/contact.routes");
 
 async function createApp() {
-  // Connect to PostgreSQL first
-  const isConnected = await connectDB();
-  if (!isConnected) {
-    console.log("WARNING: PostgreSQL not available. Some features may be limited.");
-    // don't exit - allow app to start but log warning (serverless environments shouldn't immediately exit)
-  } else {
-    console.log("SUCCESS: PostgreSQL connected successfully.");
+  // Attempt DB connect but DO NOT exit on failure
+  try {
+    const dbResult = await connectDB();
+    console.log("connectDB resolved:", dbResult ? "ok" : "no-result");
+  } catch (err) {
+    console.error("connectDB failed (continuing without exiting):", err && err.message ? err.message : err);
+    // Important: do NOT call process.exit() here
   }
 
   const app = express();
 
-  // Request logger for debugging
+  // request logger
   app.use((req, res, next) => {
-    console.log(`${req.method} ${req.url}`);
+    console.log(`${new Date().toISOString()} ${req.method} ${req.url}`);
     next();
   });
 
-  // CORS: allow all origins for now (you asked for this)
-  const corsOptions = {
-    origin: true, // allow all origins -- change later for security
-    credentials: true,
-  };
-
-  app.use(cors(corsOptions));
+  // allow all origins for now (you requested open CORS)
+  app.use(cors({ origin: true, credentials: true }));
   app.use(express.json());
   app.use(passport.initialize());
 
-  // Routes
+  // mount routes
   app.use("/auth", authRoutes);
   app.use("/offers", offersRoutes);
   app.use("/api", userRoutes);
@@ -52,33 +49,30 @@ async function createApp() {
   app.use("/api/razorpay", razorpayRoutes);
   app.use("/api/contact", contactRoutes);
 
-  // Health-check
+  // healthcheck
   app.get("/", (req, res) => res.json({ status: "ok" }));
 
-  // Error handler
+  // error handler
   app.use((err, req, res, next) => {
-    console.error(err.stack);
-    res.status(err.status || 500).json({ error: err.message || "Internal Server Error" });
+    console.error("Unhandled error:", err && (err.stack || err));
+    res.status(err && err.status ? err.status : 500).json({ error: err && err.message ? err.message : "Internal Server Error" });
   });
 
   return app;
 }
 
-// If started directly (local dev), start listening
+// local/dev runnable
 if (require.main === module) {
   (async () => {
     try {
       const app = await createApp();
       const PORT = process.env.PORT || 3002;
-      const server = app.listen(PORT, "0.0.0.0", () => console.log(`Server running on 0.0.0.0:${PORT}`));
-      server.on("error", (err) => console.error("Server error:", err));
-      server.on("listening", () => console.log("Server is listening"));
+      app.listen(PORT, "0.0.0.0", () => console.log(`Server running on 0.0.0.0:${PORT}`));
     } catch (err) {
-      console.error("Failed to start app:", err);
+      console.error("Failed to start server (dev):", err);
       process.exit(1);
     }
   })();
 }
 
-// Export for serverless wrapper (Vercel)
 module.exports = createApp;
